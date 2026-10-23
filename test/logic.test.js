@@ -13,6 +13,8 @@ const { parseAmount } = require('../src/amount');
 const { canEditContribution } = require('../src/permissions');
 
 const HOUR = 60 * 60 * 1000;
+const G1 = 'guild-1';
+const G2 = 'guild-2';
 
 test('canEditContribution allows the server owner and capo/executive role holders only', () => {
   const adminRoles = new Set(['capo', 'executive']);
@@ -41,56 +43,69 @@ test('parseAmount rejects junk and negatives', () => {
   assert.equal(parseAmount('1.2.3'), null);
 });
 
-test('logCharm adds 250K and one charm', () => {
-  const r = db.logCharm('u1', 1_000_000);
+test('logCharm adds 250K and one charm in its server', () => {
+  const r = db.logCharm(G1, 'u1', 1_000_000);
   assert.equal(r.ok, true);
   assert.equal(r.contributor.contribution, 250000);
   assert.equal(r.contributor.charms, 1);
 });
 
 test('logCharm blocks a second charm inside the 1 hour cooldown', () => {
-  const r = db.logCharm('u1', 1_000_000 + HOUR - 60_000);
+  const r = db.logCharm(G1, 'u1', 1_000_000 + HOUR - 60_000);
   assert.equal(r.ok, false);
   assert.equal(r.remainingMs, 60_000);
-  assert.equal(db.getContributor('u1').charms, 1);
+  assert.equal(db.getContributor(G1, 'u1').charms, 1);
 });
 
 test('logCharm allows another charm once the hour has passed', () => {
-  const r = db.logCharm('u1', 1_000_000 + HOUR);
+  const r = db.logCharm(G1, 'u1', 1_000_000 + HOUR);
   assert.equal(r.ok, true);
   assert.equal(r.contributor.contribution, 500000);
   assert.equal(r.contributor.charms, 2);
 });
 
 test('cooldown is per user', () => {
-  const r = db.logCharm('u2', 1_000_000 + 1);
+  const r = db.logCharm(G1, 'u2', 1_000_000 + 1);
   assert.equal(r.ok, true);
 });
 
 test('setContribution overrides the total without touching charm count', () => {
-  const { before, after } = db.setContribution('u1', 1_000_000);
+  const { before, after } = db.setContribution(G1, 'u1', 1_000_000);
   assert.equal(before, 500000);
   assert.equal(after, 1_000_000);
-  const row = db.getContributor('u1');
+  const row = db.getContributor(G1, 'u1');
   assert.equal(row.contribution, 1_000_000);
   assert.equal(row.charms, 2);
 });
 
 test('setContribution creates a row for a new user', () => {
-  const { before, after } = db.setContribution('u3', 42);
+  const { before, after } = db.setContribution(G1, 'u3', 42);
   assert.equal(before, 0);
   assert.equal(after, 42);
-  assert.equal(db.getContributor('u3').charms, 0);
+  assert.equal(db.getContributor(G1, 'u3').charms, 0);
 });
 
-test('getTotals and listContributors reflect all users', () => {
-  const totals = db.getTotals();
-  // u1: 1,000,000 · u2: 250,000 · u3: 42
+test('totals and lists cover only the given server', () => {
+  // G1: u1 1,000,000 · u2 250,000 · u3 42
+  const totals = db.getTotals(G1);
   assert.equal(totals.contribution, 1_000_042 + 250000);
   assert.equal(totals.charms, 3);
-  const list = db.listContributors();
+  const list = db.listContributors(G1);
   assert.equal(list[0].user_id, 'u1');
   assert.equal(list.length, 3);
+});
+
+test('a server has its own separate ledger, cooldown, and totals', () => {
+  // Same user as G1's u1, but nothing has been logged for them in G2 yet.
+  assert.equal(db.getContributor(G2, 'u1'), null);
+  const r = db.logCharm(G2, 'u1', 1_000_000 + 1);
+  assert.equal(r.ok, true, 'cooldown in G1 must not block G2');
+  assert.equal(r.contributor.contribution, 250000);
+
+  assert.deepEqual(db.getTotals(G2), { contribution: 250000, charms: 1 });
+  assert.equal(db.listContributors(G2).length, 1);
+  // G1 is unchanged by the G2 charm.
+  assert.equal(db.getContributor(G1, 'u1').contribution, 1_000_000);
 });
 
 test('each server keeps its own board, updated in place', () => {
@@ -99,5 +114,5 @@ test('each server keeps its own board, updated in place', () => {
   db.setBoard('g1', 'c1', 'm2');
   db.setBoard('g2', 'c9', 'm9');
   assert.deepEqual(db.getBoard('g1'), { guild_id: 'g1', channel_id: 'c1', message_id: 'm2' });
-  assert.equal(db.listBoards().length, 2);
+  assert.deepEqual(db.getBoard('g2'), { guild_id: 'g2', channel_id: 'c9', message_id: 'm9' });
 });

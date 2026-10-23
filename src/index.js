@@ -37,27 +37,29 @@ function formatRemaining(ms) {
   return h ? `${h}h ${m}m` : `${m}m`;
 }
 
-function renderBoard(updatedAt) {
-  return buildBoard(db.listContributors(), db.getTotals(), { updatedAt });
+// Each server's totals come only from that server's own ledger.
+function renderBoard(guildId, updatedAt) {
+  return buildBoard(db.listContributors(guildId), db.getTotals(guildId), { updatedAt });
 }
 
-// Edits every server's live board in place so members see the new totals.
-// If a board message was deleted, posts a fresh one in the same channel.
-async function refreshBoards() {
-  const content = renderBoard(Date.now());
-  for (const board of db.listBoards()) {
+// Edits this server's live board in place. If the board message was deleted,
+// posts a fresh one in the same channel. Other servers are not touched.
+async function refreshBoard(guildId) {
+  const board = db.getBoard(guildId);
+  if (!board) return;
+
+  const content = renderBoard(guildId, Date.now());
+  try {
+    const channel = await client.channels.fetch(board.channel_id);
     try {
-      const channel = await client.channels.fetch(board.channel_id);
-      try {
-        const message = await channel.messages.fetch(board.message_id);
-        await message.edit({ content, allowedMentions: noPings });
-      } catch {
-        const message = await channel.send({ content, allowedMentions: noPings });
-        db.setBoard(board.guild_id, channel.id, message.id);
-      }
-    } catch (err) {
-      console.error(`Could not refresh the board in server ${board.guild_id}:`, err.message);
+      const message = await channel.messages.fetch(board.message_id);
+      await message.edit({ content, allowedMentions: noPings });
+    } catch {
+      const message = await channel.send({ content, allowedMentions: noPings });
+      db.setBoard(guildId, channel.id, message.id);
     }
+  } catch (err) {
+    console.error(`Could not refresh the board in server ${guildId}:`, err.message);
   }
 }
 
@@ -70,9 +72,10 @@ client.on(Events.MessageCreate, async (message) => {
   const roleNames = message.mentions.roles.map((role) => role.name);
   if (!isCharmTrigger(message.content, roleNames)) return;
 
+  const guildId = message.guildId;
   const userId = message.author.id;
   try {
-    const result = db.logCharm(userId);
+    const result = db.logCharm(guildId, userId);
     if (!result.ok) {
       return await message.reply({
         content: `<@${userId}> is on cooldown. You can log again in ${formatRemaining(result.remainingMs)}.`,
@@ -85,7 +88,7 @@ client.on(Events.MessageCreate, async (message) => {
       content: `✨ Logged 1 shiny charm for <@${userId}> (+${fmt(db.CHARM_VALUE)}). Total: ${fmt(contribution)} · ${charms} ${charms === 1 ? 'charm' : 'charms'}.`,
       allowedMentions: noPings,
     });
-    await refreshBoards();
+    await refreshBoard(guildId);
   } catch (err) {
     console.error(err);
   }
@@ -93,6 +96,9 @@ client.on(Events.MessageCreate, async (message) => {
 
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
+  if (!interaction.guildId) return interaction.reply(ephemeral('Use this command inside a server.'));
+
+  const guildId = interaction.guildId;
 
   try {
     const isAdmin = () => {
@@ -103,7 +109,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     switch (interaction.commandName) {
       case 'log': {
         return interaction.reply({
-          content: buildBoard(db.listContributors(), db.getTotals()),
+          content: buildBoard(db.listContributors(guildId), db.getTotals(guildId)),
           allowedMentions: noPings,
         });
       }
@@ -113,16 +119,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
         // Move this server's board: remove the old message if it still exists.
-        const old = db.getBoard(interaction.guildId);
+        const old = db.getBoard(guildId);
         if (old) {
           const oldChannel = await client.channels.fetch(old.channel_id).catch(() => null);
           const oldMessage = await oldChannel?.messages.fetch(old.message_id).catch(() => null);
           await oldMessage?.delete().catch(() => null);
         }
 
-        const message = await interaction.channel.send({ content: renderBoard(Date.now()), allowedMentions: noPings });
-        db.setBoard(interaction.guildId, interaction.channelId, message.id);
-        return interaction.editReply({ content: 'Live board posted here. It updates on every logged charm and contribution edit.' });
+        const message = await interaction.channel.send({
+          content: renderBoard(guildId, Date.now()),
+          allowedMentions: noPings,
+        });
+        db.setBoard(guildId, interaction.channelId, message.id);
+        return interaction.editReply({ content: 'Live board posted here. It updates on every logged charm and contribution edit in this server.' });
       }
 
       case 'editcontribution': {
@@ -135,12 +144,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
           return interaction.reply(ephemeral(`Couldn't read "${raw}". Use a number like 250000, 250k, or 1.5m.`));
         }
 
-        const { before, after } = db.setContribution(target.id, amount);
+        const { before, after } = db.setContribution(guildId, target.id, amount);
         await interaction.reply({
           content: `Contribution for <@${target.id}>: ${fmt(before)} → ${fmt(after)}.`,
           allowedMentions: noPings,
         });
-        return refreshBoards();
+        return refreshBoard(guildId);
       }
 
       default:

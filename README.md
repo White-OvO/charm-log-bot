@@ -1,6 +1,6 @@
 # Charm Log Bot (PokeMMO)
 
-A Discord bot that logs shiny charm uses. Each time a member mentions `@shinycharm` (or `@shiny charm`), they get credited with one charm worth **250,000** contribution, subject to a **1 hour cooldown per user**. A live board in a channel shows everyone's totals and updates on every change. Totals are stored locally in SQLite, not in Discord.
+A Discord bot that logs shiny charm uses. Each time a member mentions `@shinycharm` (or `@shiny charm`), they get credited with one charm worth **250,000** contribution, subject to a **1 hour cooldown per user**. Each Discord server has its own separate ledger: its own totals, charm counts, and cooldowns. A live board in a channel shows that server's totals and updates on every change. Data is stored locally in SQLite, not in Discord.
 
 ## How to use (for server members)
 
@@ -9,16 +9,16 @@ A Discord bot that logs shiny charm uses. Each time a member mentions `@shinycha
 | Mention `@shinycharm` or `@shiny charm` in any channel | +250,000 to your contribution and +1 charm. The bot replies with your new total, and the live board updates. |
 | Mention it again within 1 hour | The bot tells you how long to wait. Nothing is counted. |
 | Run `/log` | Shows the grand total and every member's contribution and charm count. |
-| Look at the live board | Everyone sees the same totals, updated after every charm or edit. |
+| Look at the live board | Everyone in that server sees the same totals, updated after every charm or edit. |
 
-- Each member has their own 1 hour cooldown. One person's charm doesn't affect anyone else.
+- Each member has their own 1 hour cooldown in each server. One person's charm doesn't affect anyone else.
 - The cooldown starts when a charm is logged. Mentions that are refused during cooldown don't reset it.
 
 ### The live board (admins)
 
 Run `/board` in the channel where each server's members should see totals. Every server gets its own board. Running `/board` again in the same server moves that server's board. Until `/board` has been run in a server, nothing is posted there, but charms are still logged and `/log` still works.
 
-Totals are shared across all servers the bot is in. Each board is one message that the bot edits in place after every change. If someone deletes a board message, the next change posts a fresh one in the same channel.
+Each server's totals are kept separate from every other server. A charm logged in one server never changes another server's totals, cooldowns, or board. Each board is one message that the bot edits in place after every change. If someone deletes a board message, the next change posts a fresh one in the same channel.
 
 The bot only sees servers it has been invited to. Invite it to each server before running `/board` there.
 
