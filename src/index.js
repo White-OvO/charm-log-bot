@@ -18,7 +18,6 @@ const adminRoles = new Set(
 
 // Only the users we name are pinged; the bot never pings @everyone or roles.
 const noPings = { parse: [] };
-const BOARD_KEY = 'board';
 
 const client = new Client({
   intents: [
@@ -42,29 +41,28 @@ function renderBoard(updatedAt) {
   return buildBoard(db.listContributors(), db.getTotals(), { updatedAt });
 }
 
-// Edits the live board in place so everyone in the channel sees the new totals.
-// If the board message was deleted, posts a fresh one and remembers it.
-async function refreshBoard() {
-  const saved = db.getSetting(BOARD_KEY);
-  if (!saved) return;
-
+// Edits every server's live board in place so members see the new totals.
+// If a board message was deleted, posts a fresh one in the same channel.
+async function refreshBoards() {
   const content = renderBoard(Date.now());
-  try {
-    const channel = await client.channels.fetch(saved.channelId);
+  for (const board of db.listBoards()) {
     try {
-      const message = await channel.messages.fetch(saved.messageId);
-      await message.edit({ content, allowedMentions: noPings });
-    } catch {
-      const message = await channel.send({ content, allowedMentions: noPings });
-      db.setSetting(BOARD_KEY, { channelId: channel.id, messageId: message.id });
+      const channel = await client.channels.fetch(board.channel_id);
+      try {
+        const message = await channel.messages.fetch(board.message_id);
+        await message.edit({ content, allowedMentions: noPings });
+      } catch {
+        const message = await channel.send({ content, allowedMentions: noPings });
+        db.setBoard(board.guild_id, channel.id, message.id);
+      }
+    } catch (err) {
+      console.error(`Could not refresh the board in server ${board.guild_id}:`, err.message);
     }
-  } catch (err) {
-    console.error('Could not refresh the board:', err);
   }
 }
 
 client.once(Events.ClientReady, (c) => {
-  console.log(`Logged in as ${c.user.tag}`);
+  console.log(`Logged in as ${c.user.tag} in ${c.guilds.cache.size} server(s)`);
 });
 
 client.on(Events.MessageCreate, async (message) => {
@@ -87,7 +85,7 @@ client.on(Events.MessageCreate, async (message) => {
       content: `✨ Logged 1 shiny charm for <@${userId}> (+${fmt(db.CHARM_VALUE)}). Total: ${fmt(contribution)} · ${charms} ${charms === 1 ? 'charm' : 'charms'}.`,
       allowedMentions: noPings,
     });
-    await refreshBoard();
+    await refreshBoards();
   } catch (err) {
     console.error(err);
   }
@@ -114,16 +112,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
         if (!isAdmin()) return interaction.reply(ephemeral('Only the server owner or the capo/executive roles can post the board.'));
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-        // Move the board: remove the old message if it still exists.
-        const old = db.getSetting(BOARD_KEY);
+        // Move this server's board: remove the old message if it still exists.
+        const old = db.getBoard(interaction.guildId);
         if (old) {
-          const oldChannel = await client.channels.fetch(old.channelId).catch(() => null);
-          const oldMessage = await oldChannel?.messages.fetch(old.messageId).catch(() => null);
+          const oldChannel = await client.channels.fetch(old.channel_id).catch(() => null);
+          const oldMessage = await oldChannel?.messages.fetch(old.message_id).catch(() => null);
           await oldMessage?.delete().catch(() => null);
         }
 
         const message = await interaction.channel.send({ content: renderBoard(Date.now()), allowedMentions: noPings });
-        db.setSetting(BOARD_KEY, { channelId: interaction.channelId, messageId: message.id });
+        db.setBoard(interaction.guildId, interaction.channelId, message.id);
         return interaction.editReply({ content: 'Live board posted here. It updates on every logged charm and contribution edit.' });
       }
 
@@ -142,7 +140,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           content: `Contribution for <@${target.id}>: ${fmt(before)} → ${fmt(after)}.`,
           allowedMentions: noPings,
         });
-        return refreshBoard();
+        return refreshBoards();
       }
 
       default:

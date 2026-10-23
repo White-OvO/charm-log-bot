@@ -16,9 +16,11 @@ A Discord bot that logs shiny charm uses. Each time a member mentions `@shinycha
 
 ### The live board (admins)
 
-Run `/board` in the channel where everyone should see totals. The bot posts a board message there and moves it if you run `/board` again somewhere else. Until `/board` has been run, nothing is posted, but charms are still logged and `/log` still works.
+Run `/board` in the channel where each server's members should see totals. Every server gets its own board. Running `/board` again in the same server moves that server's board. Until `/board` has been run in a server, nothing is posted there, but charms are still logged and `/log` still works.
 
-The board is one message that the bot edits in place. If someone deletes it, the next charm or edit posts a fresh one in the same channel.
+Totals are shared across all servers the bot is in. Each board is one message that the bot edits in place after every change. If someone deletes a board message, the next change posts a fresh one in the same channel.
+
+The bot only sees servers it has been invited to. Invite it to each server before running `/board` there.
 
 ### Editing a contribution (admins)
 

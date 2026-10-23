@@ -93,9 +93,11 @@ test('getTotals and listContributors reflect all users', () => {
   assert.equal(list.length, 3);
 });
 
-test('settings store the live board location and survive updates', () => {
-  assert.equal(db.getSetting('board'), null);
-  db.setSetting('board', { channelId: 'c1', messageId: 'm1' });
-  db.setSetting('board', { channelId: 'c1', messageId: 'm2' });
-  assert.deepEqual(db.getSetting('board'), { channelId: 'c1', messageId: 'm2' });
+test('each server keeps its own board, updated in place', () => {
+  assert.equal(db.getBoard('g1'), null);
+  db.setBoard('g1', 'c1', 'm1');
+  db.setBoard('g1', 'c1', 'm2');
+  db.setBoard('g2', 'c9', 'm9');
+  assert.deepEqual(db.getBoard('g1'), { guild_id: 'g1', channel_id: 'c1', message_id: 'm2' });
+  assert.equal(db.listBoards().length, 2);
 });

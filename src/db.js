@@ -17,9 +17,10 @@ db.exec(`
     charms INTEGER NOT NULL DEFAULT 0,
     last_charm_at INTEGER
   );
-  CREATE TABLE IF NOT EXISTS settings (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
+  CREATE TABLE IF NOT EXISTS boards (
+    guild_id TEXT PRIMARY KEY,
+    channel_id TEXT NOT NULL,
+    message_id TEXT NOT NULL
   );
 `);
 
@@ -34,9 +35,11 @@ const stmts = {
   totals: db.prepare(
     'SELECT COALESCE(SUM(contribution), 0) AS contribution, COALESCE(SUM(charms), 0) AS charms FROM contributors'
   ),
-  getSetting: db.prepare('SELECT value FROM settings WHERE key = ?'),
-  setSetting: db.prepare(
-    'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+  getBoard: db.prepare('SELECT * FROM boards WHERE guild_id = ?'),
+  listBoards: db.prepare('SELECT * FROM boards'),
+  setBoard: db.prepare(
+    `INSERT INTO boards (guild_id, channel_id, message_id) VALUES (?, ?, ?)
+     ON CONFLICT(guild_id) DO UPDATE SET channel_id = excluded.channel_id, message_id = excluded.message_id`
   ),
 };
 
@@ -74,14 +77,18 @@ function getTotals() {
   return stmts.totals.get();
 }
 
-// Small key/value store for bot state, such as where the live board lives.
-function getSetting(key) {
-  const row = stmts.getSetting.get(key);
-  return row ? JSON.parse(row.value) : null;
+// One live board per Discord server.
+function getBoard(guildId) {
+  const row = stmts.getBoard.get(guildId);
+  return row ? { ...row } : null;
 }
 
-function setSetting(key, value) {
-  stmts.setSetting.run(key, JSON.stringify(value));
+function setBoard(guildId, channelId, messageId) {
+  stmts.setBoard.run(guildId, channelId, messageId);
+}
+
+function listBoards() {
+  return stmts.listBoards.all();
 }
 
 module.exports = {
@@ -93,6 +100,7 @@ module.exports = {
   setContribution,
   listContributors,
   getTotals,
-  getSetting,
-  setSetting,
+  getBoard,
+  setBoard,
+  listBoards,
 };
