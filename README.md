@@ -29,10 +29,10 @@ Only the **server owner** and members with the **`capo`** or **`executive`** rol
 
 ## Setup (for the bot owner)
 
-1. Open your application at https://discord.com/developers/applications/1563021052597108776/bot. The Application ID is `1563021052597108776`.
+1. Open your application at https://discord.com/developers/applications/1563026507826466817/bot. The Application ID is `1563026507826466817`.
 2. Under **Bot**, click **Reset Token** and copy the token. Under **Bot → Privileged Gateway Intents**, turn on **Message Content Intent**. Without it the bot can't read `@shinycharm` typed in text.
 3. Invite the bot from **OAuth2 → URL Generator**. Select the scopes `bot` and `applications.commands`, and these permissions: View Channels, Send Messages, Read Message History.
-4. `cp .env.example .env` and set `DISCORD_TOKEN`. `CLIENT_ID` is already set to `1563021052597108776`.
+4. `cp .env.example .env` and set `DISCORD_TOKEN`. `CLIENT_ID` is already set to `1563026507826466817`.
 5. `npm install`
 6. `npm run deploy` to register the slash commands. Set `GUILD_ID` in `.env` for instant updates while testing.
 7. `npm start`
@@ -44,7 +44,7 @@ Needs Node 22.5 or newer (uses the built-in `node:sqlite`).
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `DISCORD_TOKEN` | required | Bot token |
-| `CLIENT_ID` | `1563021052597108776` | Application ID, used by `npm run deploy` |
+| `CLIENT_ID` | `1563026507826466817` | Application ID, used by `npm run deploy` |
 | `GUILD_ID` | empty | Register commands to one server instantly |
 | `ADMIN_ROLE_NAMES` | `capo,executive` | Roles allowed to run `/editcontribution` (the server owner is always allowed) |
 | `TRIGGER_NAME` | `shinycharm` | Role or text name that counts as a charm |
