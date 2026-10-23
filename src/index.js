@@ -3,8 +3,10 @@ const { Client, GatewayIntentBits, Events, MessageFlags } = require('discord.js'
 const db = require('./db');
 const { parseAmount } = require('./amount');
 const { canEditContribution } = require('./permissions');
+const { isCharmTrigger } = require('./triggers');
+const { buildBoard } = require('./board');
 
-const { DISCORD_TOKEN, ADMIN_ROLE_NAMES, TRIGGER_NAME } = process.env;
+const { DISCORD_TOKEN, ADMIN_ROLE_NAMES } = process.env;
 if (!DISCORD_TOKEN) {
   console.error('Set DISCORD_TOKEN in .env');
   process.exit(1);
@@ -13,11 +15,10 @@ if (!DISCORD_TOKEN) {
 const adminRoles = new Set(
   (ADMIN_ROLE_NAMES || 'capo,executive').split(',').map((name) => name.trim().toLowerCase()).filter(Boolean)
 );
-const trigger = (TRIGGER_NAME || 'shinycharm').trim().toLowerCase();
-const triggerPattern = new RegExp(`@${trigger}\\b`, 'i');
 
-// Only the user IDs we name here are pinged; no @everyone or role pings from the bot.
+// Only the users we name are pinged; the bot never pings @everyone or roles.
 const noPings = { parse: [] };
+const BOARD_KEY = 'board';
 
 const client = new Client({
   intents: [
@@ -28,7 +29,6 @@ const client = new Client({
 });
 
 const ephemeral = (content) => ({ content, flags: MessageFlags.Ephemeral, allowedMentions: noPings });
-
 const fmt = (n) => n.toLocaleString('en-US');
 
 function formatRemaining(ms) {
@@ -38,10 +38,29 @@ function formatRemaining(ms) {
   return h ? `${h}h ${m}m` : `${m}m`;
 }
 
-// Role mention named like the trigger, or literal "@shinycharm" typed in the text.
-function mentionsTrigger(message) {
-  if (message.mentions.roles.some((role) => role.name.toLowerCase() === trigger)) return true;
-  return triggerPattern.test(message.content);
+function renderBoard(updatedAt) {
+  return buildBoard(db.listContributors(), db.getTotals(), { updatedAt });
+}
+
+// Edits the live board in place so everyone in the channel sees the new totals.
+// If the board message was deleted, posts a fresh one and remembers it.
+async function refreshBoard() {
+  const saved = db.getSetting(BOARD_KEY);
+  if (!saved) return;
+
+  const content = renderBoard(Date.now());
+  try {
+    const channel = await client.channels.fetch(saved.channelId);
+    try {
+      const message = await channel.messages.fetch(saved.messageId);
+      await message.edit({ content, allowedMentions: noPings });
+    } catch {
+      const message = await channel.send({ content, allowedMentions: noPings });
+      db.setSetting(BOARD_KEY, { channelId: channel.id, messageId: message.id });
+    }
+  } catch (err) {
+    console.error('Could not refresh the board:', err);
+  }
 }
 
 client.once(Events.ClientReady, (c) => {
@@ -50,7 +69,8 @@ client.once(Events.ClientReady, (c) => {
 
 client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot || !message.guildId) return;
-  if (!mentionsTrigger(message)) return;
+  const roleNames = message.mentions.roles.map((role) => role.name);
+  if (!isCharmTrigger(message.content, roleNames)) return;
 
   const userId = message.author.id;
   try {
@@ -64,9 +84,10 @@ client.on(Events.MessageCreate, async (message) => {
 
     const { contribution, charms } = result.contributor;
     await message.reply({
-      content: `✨ Logged 1 shiny charm for <@${userId}> (+${fmt(db.CHARM_VALUE)}). Total: ${fmt(contribution)} · ${charms} charm${charms === 1 ? '' : 's'}.`,
+      content: `✨ Logged 1 shiny charm for <@${userId}> (+${fmt(db.CHARM_VALUE)}). Total: ${fmt(contribution)} · ${charms} ${charms === 1 ? 'charm' : 'charms'}.`,
       allowedMentions: noPings,
     });
+    await refreshBoard();
   } catch (err) {
     console.error(err);
   }
@@ -76,32 +97,38 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
   try {
+    const isAdmin = () => {
+      const roleNames = interaction.member?.roles?.cache?.map((role) => role.name) ?? [];
+      return canEditContribution(interaction.user.id, interaction.guild?.ownerId, roleNames, adminRoles);
+    };
+
     switch (interaction.commandName) {
       case 'log': {
-        const rows = db.listContributors();
-        if (!rows.length) return interaction.reply({ content: 'No charms logged yet.', allowedMentions: noPings });
+        return interaction.reply({
+          content: buildBoard(db.listContributors(), db.getTotals()),
+          allowedMentions: noPings,
+        });
+      }
 
-        const totals = db.getTotals();
-        const header = `**Shiny Charm Log**\nTotal contribution: **${fmt(totals.contribution)}** · Charms used: **${totals.charms}**\n`;
-        const lines = rows.map(
-          (r, i) => `${i + 1}. <@${r.user_id}> — ${fmt(r.contribution)} · ${r.charms} charm${r.charms === 1 ? '' : 's'}`
-        );
+      case 'board': {
+        if (!isAdmin()) return interaction.reply(ephemeral('Only the server owner or the capo/executive roles can post the board.'));
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-        // Discord caps messages at 2000 characters; drop trailing rows if needed.
-        let shown = lines.length;
-        let content = header + '\n' + lines.join('\n');
-        while (content.length > 1900 && shown > 0) {
-          shown -= 1;
-          content = header + '\n' + lines.slice(0, shown).join('\n') + `\n…and ${lines.length - shown} more`;
+        // Move the board: remove the old message if it still exists.
+        const old = db.getSetting(BOARD_KEY);
+        if (old) {
+          const oldChannel = await client.channels.fetch(old.channelId).catch(() => null);
+          const oldMessage = await oldChannel?.messages.fetch(old.messageId).catch(() => null);
+          await oldMessage?.delete().catch(() => null);
         }
-        return interaction.reply({ content, allowedMentions: noPings });
+
+        const message = await interaction.channel.send({ content: renderBoard(Date.now()), allowedMentions: noPings });
+        db.setSetting(BOARD_KEY, { channelId: interaction.channelId, messageId: message.id });
+        return interaction.editReply({ content: 'Live board posted here. It updates on every logged charm and contribution edit.' });
       }
 
       case 'editcontribution': {
-        const roleNames = interaction.member?.roles?.cache?.map((role) => role.name) ?? [];
-        if (!canEditContribution(interaction.user.id, interaction.guild?.ownerId, roleNames, adminRoles)) {
-          return interaction.reply(ephemeral('Only the server owner or the capo/executive roles can edit contributions.'));
-        }
+        if (!isAdmin()) return interaction.reply(ephemeral('Only the server owner or the capo/executive roles can edit contributions.'));
 
         const target = interaction.options.getUser('user', true);
         const raw = interaction.options.getString('amount', true);
@@ -111,10 +138,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
 
         const { before, after } = db.setContribution(target.id, amount);
-        return interaction.reply({
+        await interaction.reply({
           content: `Contribution for <@${target.id}>: ${fmt(before)} → ${fmt(after)}.`,
           allowedMentions: noPings,
         });
+        return refreshBoard();
       }
 
       default:

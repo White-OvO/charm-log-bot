@@ -17,6 +17,10 @@ db.exec(`
     charms INTEGER NOT NULL DEFAULT 0,
     last_charm_at INTEGER
   );
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
 `);
 
 const stmts = {
@@ -29,6 +33,10 @@ const stmts = {
   list: db.prepare('SELECT * FROM contributors ORDER BY contribution DESC, charms DESC'),
   totals: db.prepare(
     'SELECT COALESCE(SUM(contribution), 0) AS contribution, COALESCE(SUM(charms), 0) AS charms FROM contributors'
+  ),
+  getSetting: db.prepare('SELECT value FROM settings WHERE key = ?'),
+  setSetting: db.prepare(
+    'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
   ),
 };
 
@@ -66,6 +74,16 @@ function getTotals() {
   return stmts.totals.get();
 }
 
+// Small key/value store for bot state, such as where the live board lives.
+function getSetting(key) {
+  const row = stmts.getSetting.get(key);
+  return row ? JSON.parse(row.value) : null;
+}
+
+function setSetting(key, value) {
+  stmts.setSetting.run(key, JSON.stringify(value));
+}
+
 module.exports = {
   CHARM_VALUE,
   COOLDOWN_MS,
@@ -75,4 +93,6 @@ module.exports = {
   setContribution,
   listContributors,
   getTotals,
+  getSetting,
+  setSetting,
 };

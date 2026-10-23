@@ -92,3 +92,10 @@ test('getTotals and listContributors reflect all users', () => {
   assert.equal(list[0].user_id, 'u1');
   assert.equal(list.length, 3);
 });
+
+test('settings store the live board location and survive updates', () => {
+  assert.equal(db.getSetting('board'), null);
+  db.setSetting('board', { channelId: 'c1', messageId: 'm1' });
+  db.setSetting('board', { channelId: 'c1', messageId: 'm2' });
+  assert.deepEqual(db.getSetting('board'), { channelId: 'c1', messageId: 'm2' });
+});
