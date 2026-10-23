@@ -1,0 +1,19 @@
+{
+  "name": "charm-log-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Discord bot that logs shiny charm uses and contribution totals for PokeMMO",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "deploy": "node deploy-commands.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22.5"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.0",
+    "dotenv": "^16.4.5"
+  }
+}
